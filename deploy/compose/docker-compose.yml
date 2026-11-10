@@ -1,0 +1,28 @@
+name: orders
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orders}
+      POSTGRES_DB: orders
+    volumes:
+      - pgdata:/var/lib/postgresql/data     # данные живут вне контейнера
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders -d orders"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  order-api:
+    build: ../../services/order-api
+    environment:
+      DATABASE_URL: postgresql://orders:${POSTGRES_PASSWORD:-orders}@postgres:5432/orders
+    ports:
+      - "127.0.0.1:8080:8000"                # только localhost сервера: 8080 снаружи контейнера, 8000 внутри
+    depends_on:
+      postgres:
+        condition: service_healthy           # ждать готовности базы, а не просто старта
+
+volumes:
+  pgdata:
