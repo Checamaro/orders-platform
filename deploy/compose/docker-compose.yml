@@ -18,11 +18,83 @@ services:
     build: ../../services/order-api
     environment:
       DATABASE_URL: postgresql://orders:${POSTGRES_PASSWORD:-orders}@postgres:5432/orders
+      KAFKA_BOOTSTRAP: kafka:9092
     ports:
-      - "127.0.0.1:8080:8000"                # только localhost сервера: 8080 снаружи контейнера, 8000 внутри
+      - "127.0.0.1:8080:8000"
     depends_on:
       postgres:
-        condition: service_healthy           # ждать готовности базы, а не просто старта
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully   # стартовать, когда топики созданы
+
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller        # один узел — и брокер, и контроллер (KRaft)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092   # адрес, который брокер сообщает клиентам
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1     # один брокер — реплик больше одной быть не может
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"      # топики создаём явно
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"          # ограничиваем память
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  kafka-init:
+    image: apache/kafka:4.0.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    # скрипт — один элемент списка: compose не режет его по пробелам
+    # $$ — экранирование для compose, в shell попадёт обычный $
+    command:
+      - |
+        for t in orders.created orders.processed; do
+          n=0
+          until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1; do
+            n=$$((n+1)); [ $$n -ge 20 ] && exit 1
+            echo "kafka not ready, retry $$n"; sleep 3
+          done
+        done
+    restart: "no"
+
+  kafka-ui:
+    image: kafbat/kafka-ui:latest
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  order-worker:
+    build: ../../services/order-worker
+    environment:
+      DATABASE_URL: postgresql://orders:${POSTGRES_PASSWORD:-orders}@postgres:5432/orders
+      KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka-init: { condition: service_completed_successfully }
+
+  notifier:
+    build: ../../services/notifier
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
 
 volumes:
   pgdata:

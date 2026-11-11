@@ -1,12 +1,20 @@
+import json
 import os
 from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
 import psycopg
+from confluent_kafka import Producer
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 DSN = os.getenv("DATABASE_URL", "postgresql://orders:orders@localhost:5432/orders")
+
+producer = Producer({
+    "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP", "localhost:9092"),
+    "acks": "all",                 # подтверждение записи брокером
+    "enable.idempotence": True,    # продюсер не создаёт дублей при повторах
+})
 
 
 class OrderIn(BaseModel):
@@ -50,6 +58,9 @@ def create_order(order: OrderIn):
             "INSERT INTO orders (id, item, qty) VALUES (%s, %s, %s)",
             (order_id, order.item, order.qty),
         )
+    event = {"order_id": str(order_id), "item": order.item, "qty": order.qty}
+    producer.produce("orders.created", key=str(order_id), value=json.dumps(event))
+    producer.flush(5)
     return {"id": str(order_id), "status": "NEW"}
 
 
@@ -62,3 +73,4 @@ def get_order(order_id: UUID):
     if row is None:
         raise HTTPException(status_code=404, detail="order not found")
     return {"id": str(row[0]), "item": row[1], "qty": row[2], "status": row[3]}
+
