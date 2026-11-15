@@ -1,0 +1,10 @@
+---
+extends: default
+
+rules:
+  line-length:
+    max: 120                # 80 — слишком мало для команд в run:
+  truthy:
+    check-keys: false       # не ругаться на ключ on: в GitHub Actions
+  comments:
+    min-spaces-from-content: 1
