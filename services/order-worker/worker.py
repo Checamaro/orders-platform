@@ -6,6 +6,13 @@ import time
 
 import psycopg
 from confluent_kafka import Consumer, Producer
+from prometheus_client import Counter, Histogram, start_http_server
+
+PROCESSED = Counter("orders_processed_total", "Orders processed")
+DUPLICATES = Counter("orders_duplicates_total", "Duplicate events skipped")
+E2E = Histogram("order_e2e_seconds", "Time from order creation to processing",
+                buckets=(0.5, 1, 2, 5, 10, 30))
+start_http_server(8001)   # /metrics на порту 8001
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("order-worker")
@@ -49,8 +56,12 @@ while running:
     if cur.rowcount == 1:
         producer.produce("orders.processed", key=msg.key(), value=msg.value())
         producer.flush(5)
+        PROCESSED.inc()                                   # 7.3: +1 обработанный заказ
+        if "ts" in event:                                 # 7.3: старые события без ts пропускаем
+            E2E.observe(time.time() - event["ts"])        # секунд от создания до обработки
         log.info("processed %s (partition %s)", event["order_id"], msg.partition())
     else:
+        DUPLICATES.inc()                                  # 7.3: повтор — заказ уже PROCESSED
         log.info("skip duplicate %s", event["order_id"])   # идемпотентность
     consumer.commit(message=msg, asynchronous=False)
 

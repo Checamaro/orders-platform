@@ -1,0 +1,21 @@
+groups:
+  - name: orders
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} не отвечает на /metrics"
+      - alert: HighErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Больше 5% ответов order-api — 5xx"
+      - alert: ConsumerLagHigh
+        expr: sum(kafka_consumergroup_lag{consumergroup="order-workers"}) > 100
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Воркеры не успевают: лаг {{ $value }} сообщений"
