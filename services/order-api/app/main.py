@@ -6,12 +6,14 @@ from uuid import UUID, uuid4
 
 import psycopg
 from confluent_kafka import Producer
-from fastapi import FastAPI, HTTPException, Request
-from prometheus_client import Counter, Histogram, make_asgi_app
+from fastapi import FastAPI, HTTPException, Request, Response
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Histogram,
+    generate_latest,
+)
 from pydantic import BaseModel, Field
-
-from fastapi import Response
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 DSN = os.getenv("DATABASE_URL", "postgresql://orders:orders@localhost:5432/orders")
 

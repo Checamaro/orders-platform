@@ -4,7 +4,7 @@ import os
 import signal
 
 from confluent_kafka import Consumer
-from prometheus_client import Counter, start_http_server          # 7.3
+from prometheus_client import Counter, start_http_server  # 7.3
 
 SENT = Counter("notifications_sent_total", "Notifications sent")  # 7.3
 start_http_server(8001)                                            # 7.3: /metrics на порту 8001
@@ -44,7 +44,8 @@ while running:
     event = json.loads(msg.value())
     # здесь в настоящем сервисе было бы письмо или push; у нас — запись в лог
     log.info("notification sent for %s", event["order_id"])
-    SENT.inc()                                         # 7.3: считаем после отправки, до коммита offset
+    # 7.3: считаем после отправки, до коммита offset
+    SENT.inc()                                
     consumer.commit(message=msg, asynchronous=False)   # offset сдвигается только после отправки
 
 consumer.close()   # выйти из группы сразу — ребалансировка быстрее
