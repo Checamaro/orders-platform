@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: app-config, namespace: orders }
+data:
+  KAFKA_BOOTSTRAP: kafka:9092
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: order-api, namespace: orders }
+spec:
+  selector: { matchLabels: { app: order-api } }
+  template:
+    metadata: { labels: { app: order-api } }
+    spec:
+      containers:
+        - name: app
+          image: orders-order-api:dev
+          imagePullPolicy: IfNotPresent
+          envFrom: [{ configMapRef: { name: app-config } }]
+          env:
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-credentials, key: POSTGRES_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgresql://orders:$(DB_PASSWORD)@postgres:5432/orders" }
+          ports: [{ containerPort: 8000 }]
+          readinessProbe:                     # готов принимать трафик: проверяет и базу
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 5
+          livenessProbe:                      # жив ли процесс: база не участвует
+            tcpSocket: { port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: order-api, namespace: orders }
+spec:
+  type: NodePort
+  selector: { app: order-api }
+  ports: [{ port: 8000, targetPort: 8000, nodePort: 30080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: order-worker, namespace: orders }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: order-worker } }
+  template:
+    metadata: { labels: { app: order-worker } }
+    spec:
+      terminationGracePeriodSeconds: 20   # время на аккуратный выход по SIGTERM
+      containers:
+        - name: app
+          image: orders-order-worker:dev
+          imagePullPolicy: IfNotPresent
+          envFrom: [{ configMapRef: { name: app-config } }]
+          env:
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: postgres-credentials, key: POSTGRES_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgresql://orders:$(DB_PASSWORD)@postgres:5432/orders" }
+          ports: [{ name: metrics, containerPort: 8001 }]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 192Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: notifier, namespace: orders }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: notifier } }
+  template:
+    metadata: { labels: { app: notifier } }
+    spec:
+      containers:
+        - name: app
+          image: orders-notifier:dev
+          imagePullPolicy: IfNotPresent
+          envFrom: [{ configMapRef: { name: app-config } }]
+          ports: [{ name: metrics, containerPort: 8001 }]
+          resources:
+            requests: { cpu: 20m, memory: 48Mi }
+            limits: { memory: 128Mi }
